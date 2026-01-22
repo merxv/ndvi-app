@@ -1,0 +1,25 @@
+# env
+.env
+.env.*
+!.env.example
+
+# secrets/configs
+**/secrets/
+**/*.key
+**/*.pem
+
+# sensitive json (настрой под себя)
+ndvi-key.json
+**/config.json
+**/*secret*.json
+**/*credentials*.json
+
+# node / python / common
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
