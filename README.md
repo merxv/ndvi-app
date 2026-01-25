@@ -12,7 +12,7 @@
 
 - Node.js 18+
 - npm 9+
-- Python 3.10+
+- Python 3.11 (для AutoGluon)
 - Аккаунт Google Earth Engine + Service Account key (JSON)
 - Ключ OpenWeather API
 - Ключ Google Maps JavaScript API
@@ -40,12 +40,15 @@ OPENWEATHER_API_KEY=
 REACT_APP_GOOGLE_MAPS_API_KEY=
 ```
 
-### 3) Model (опционально)
+### 3) Model (BNS, AutoML)
 
-В `model/` можно указать путь к историческим данным через переменную окружения:
+Модель обучается отдельно через AutoGluon и затем только загружается в FastAPI.
+
+Переменные окружения (опционально):
 
 ```
 BNS_LONG_CSV=data/bns_yield_2004_2024_long.csv
+AUTOML_MODEL_PATH=model/autogluon_bns_model
 ```
 
 ## Установка зависимостей
@@ -59,9 +62,9 @@ npm install
 cd ..\frontend
 npm install
 
-# model (опционально)
+# model (AutoML)
 cd ..\model
-python -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -83,9 +86,10 @@ npm start
 ```
 
 ```
-# model (опционально)
+# model (AutoML)
 cd model
 .\.venv\Scripts\activate
+python train_automl.py
 uvicorn app:app --reload --port 8000
 ```
 
@@ -121,13 +125,14 @@ uvicorn app:app --reload --port 8000
 
 По умолчанию в UI используются даты `2024-06-01`…`2024-08-31` и `cloudPct = 20`.
 
-## Model API (BNS)
+## Model API (BNS, AutoML)
 
 - `GET /health`
 - `POST /predict` (multipart/form-data, поле `file` с CSV)
 
 CSV должен содержать минимум колонки `district` и `year`.
 Если в CSV есть столбцы `ndvi_mean`, `ndvi_min`, `ndvi_max`, `gee_air_temp_mean`, сервис применит MVP‑корректировку урожайности.
+AutoML использует только признаки из BNS: `district`, `year`, `yield_lag1`, `yield_lag2`, `yield_roll3`.
 
 ## Примечания
 

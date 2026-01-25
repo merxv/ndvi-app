@@ -11,26 +11,33 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bns_model import (
     load_bns_long_csv,
-    train_baseline_model,
+    load_automl_model,
     attach_lags_for_prediction,
     apply_mvp_adjustment,
 )
 
-DATA_PATH = os.getenv("BNS_LONG_CSV", "data/bns_yield_2004_2024_long.csv")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.getenv(
+    "BNS_LONG_CSV",
+    os.path.join(BASE_DIR, "data", "bns_yield_2004_2024_long.csv"),
+)
+MODEL_PATH = os.getenv(
+    "AUTOML_MODEL_PATH",
+    os.path.join(BASE_DIR, "autogluon_bns_model"),
+)
 
 app = FastAPI(title="Yield Service (BNS baseline + NDVI adjustment)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # на проде лучше сузить
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# глобально держим историю и модель в памяти
 BNS_HIST = load_bns_long_csv(DATA_PATH)
-BASELINE_MODEL = train_baseline_model(BNS_HIST)
+BASELINE_MODEL = load_automl_model(MODEL_PATH)
 
 @app.get("/health")
 def health():
@@ -46,11 +53,11 @@ async def predict(file: UploadFile = File(...), mvp_adjust: bool = True):
     content = await file.read()
     df = pd.read_csv(io.BytesIO(content))
 
-    # district обязателен, иначе не знаем какую историю брать
+    # district
     if "district" not in df.columns:
         return {"error": "CSV must include 'district' column (e.g. 'Целиноградский район')."}
 
-    # привести year к числу
+    
     df["year"] = pd.to_numeric(df["year"], errors="coerce")
     df = df.dropna(subset=["year"]).copy()
     df["year"] = df["year"].astype(int)
@@ -59,7 +66,7 @@ async def predict(file: UploadFile = File(...), mvp_adjust: bool = True):
 
     # baseline prediction
     needed_cols = ["district", "year", "yield_lag1", "yield_lag2", "yield_roll3"]
-    df2["yield_pred_base_t_ha"] = BASELINE_MODEL.predict(df2[needed_cols])
+    df2["yield_pred_base_t_ha"] = BASELINE_MODEL.predict(df2[needed_cols]).astype(float)
 
     # optional MVP adjustment using NDVI/temp
     if mvp_adjust:
