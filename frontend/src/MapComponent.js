@@ -49,6 +49,9 @@ const MapComponent = () => {
   const [bnsFile, setBnsFile] = useState(null);
   const [bnsResults, setBnsResults] = useState(null);
   const [bnsError, setBnsError] = useState(null);
+  const [bnsModelInfo, setBnsModelInfo] = useState(null);
+  const [bnsModelInfoError, setBnsModelInfoError] = useState(null);
+  const [bnsModelInfoLoading, setBnsModelInfoLoading] = useState(false);
 
   const BNS_MODEL_URL = 'http://localhost:8000/predict';
 
@@ -161,6 +164,16 @@ const MapComponent = () => {
     }
     return numberValue.toFixed(decimals);
   };
+  const formatMetricValue = (value, decimals) => {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return '';
+    }
+    return Math.abs(numberValue).toFixed(decimals);
+  };
 
   const downloadSummaryCSV = () => {
     if (!polygonId) {
@@ -221,6 +234,7 @@ const MapComponent = () => {
 
     try {
       setBnsError(null);
+      setBnsModelInfoError(null);
       const response = await fetch(BNS_MODEL_URL, {
         method: 'POST',
         body: formData
@@ -230,6 +244,23 @@ const MapComponent = () => {
         throw new Error(data.error || 'BNS model error');
       }
       setBnsResults(data.records || []);
+      if (!bnsModelInfo) {
+        setBnsModelInfoLoading(true);
+        try {
+          const infoResponse = await fetch('http://localhost:8000/model-info');
+          const infoData = await infoResponse.json();
+          if (!infoResponse.ok || infoData.error) {
+            throw new Error(infoData.error || 'Failed to load model info');
+          }
+          setBnsModelInfo(infoData);
+        } catch (infoError) {
+          console.error('BNS model info error:', infoError);
+          setBnsModelInfo(null);
+          setBnsModelInfoError(infoError.message || 'Failed to load model info');
+        } finally {
+          setBnsModelInfoLoading(false);
+        }
+      }
     } catch (error) {
       console.error('BNS model error:', error);
       setBnsResults(null);
@@ -511,16 +542,16 @@ const MapComponent = () => {
           {ndvi !== null && (
             <div>
               <div className="results-item" style={{ color: getNDVIColor(ndvi) }}>
-                NDVI средний: {ndvi.toFixed(3)} ({getNDVIText(ndvi)})
+                NDVI средний: {ndvi != null ? ndvi.toFixed(3) : '—'} ({getNDVIText(ndvi)})
               </div>
               {ndviMin !== null && (
                 <div className="results-item" style={{ color: getNDVIColor(ndviMin) }}>
-                  NDVI мин: {ndviMin.toFixed(3)}
+                  NDVI мин: {ndviMin != null ? ndviMin.toFixed(3) : '—'}
                 </div>
               )}
               {ndviMax !== null && (
                 <div className="results-item" style={{ color: getNDVIColor(ndviMax) }}>
-                  NDVI макс: {ndviMax.toFixed(3)}
+                  NDVI макс: {ndviMax != null ? ndviMax.toFixed(3) : '—'}
                 </div>
               )}
             </div>
@@ -613,6 +644,60 @@ const MapComponent = () => {
                     <div>{`Итоговый прогноз: ${formatNumber(row.yield_pred_t_ha, 3)} т/га`}</div>
                   </div>
                 ))}
+              </div>
+            )}
+            {bnsModelInfoLoading && (
+              <div className="results-item">Загрузка статистики модели...</div>
+            )}
+            {bnsModelInfoError && (
+              <div className="results-item" style={{ color: "red" }}>
+                {bnsModelInfoError}
+              </div>
+            )}
+            {bnsModelInfo && (
+              <div className="results-item" style={{ marginTop: "8px" }}>
+                <div style={{ fontWeight: "600", marginBottom: "4px" }}>АutoML: выбор модели</div>
+                <div>{`Лучшая модель: ${bnsModelInfo.automl?.best_model || ""}`}</div>
+                <div>{`Метрика выбора: ${bnsModelInfo.automl?.eval_metric || ""}`}</div>
+                <div>{`Stack level: ${bnsModelInfo.automl?.best_model_stack_level ?? ""}`}</div>
+                <div>{`Всего моделей: ${bnsModelInfo.automl?.num_models_trained ?? ""}`}</div>
+                <div>{`Уровней ансамбля: ${bnsModelInfo.automl?.num_stack_levels ?? ""}`}</div>
+                <div>{`Время обучения (сек): ${formatNumber(bnsModelInfo.automl?.total_train_time_seconds, 1)}`}</div>
+                {bnsModelInfo.automl?.selection_note && (
+                  <div style={{ fontSize: "12px", color: "#555", marginTop: "4px" }}>
+                    {bnsModelInfo.automl.selection_note}
+                  </div>
+                )}
+                <div style={{ fontWeight: "600", marginTop: "8px", marginBottom: "4px" }}>Статистика модели</div>
+                {bnsModelInfo.metrics && (
+                  <div>
+                    {bnsModelInfo.metrics.r2 !== undefined && (
+                      <div>{`R^2: ${formatNumber(bnsModelInfo.metrics.r2, 4)}`}</div>
+                    )}
+                    {bnsModelInfo.metrics.root_mean_squared_error !== undefined && (
+                      <div>{`RMSE: ${formatMetricValue(bnsModelInfo.metrics.root_mean_squared_error, 4)}`}</div>
+                    )}
+                    {bnsModelInfo.metrics.mean_absolute_error !== undefined && (
+                      <div>{`MAE: ${formatMetricValue(bnsModelInfo.metrics.mean_absolute_error, 4)}`}</div>
+                    )}
+                    {bnsModelInfo.metrics.mean_squared_error !== undefined && (
+                      <div>{`MSE: ${formatMetricValue(bnsModelInfo.metrics.mean_squared_error, 4)}`}</div>
+                    )}
+                    {bnsModelInfo.metrics.mean_absolute_percentage_error !== undefined && (
+                      <div>{`MAPE: ${formatMetricValue(bnsModelInfo.metrics.mean_absolute_percentage_error, 4)}`}</div>
+                    )}
+                  </div>
+                )}
+                {bnsModelInfo.leaderboard && bnsModelInfo.leaderboard.length > 0 && (
+                  <div style={{ marginTop: "8px" }}>
+                    <div style={{ fontWeight: "600", marginBottom: "4px" }}>Таблица моделей (leaderboard)</div>
+                    {bnsModelInfo.leaderboard.map((row, idx) => (
+                      <div key={`${row.model || "model"}-${idx}`} style={{ fontSize: "12px", marginBottom: "2px" }}>
+                        {`${idx + 1}) ${row.model || ""} | score_val: ${formatNumber(row.score_val, 4)} | fit_time: ${formatNumber(row.fit_time, 2)}s`}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -59,23 +59,38 @@ app.post('/api/ndvi', async (req, res) => {
 
     const geometry = ee.Geometry.Polygon([coords]);
 
-    const ndviImage = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+    const collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
       .filterBounds(geometry)
       .filterDate(dateStart, dateEnd)
       .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloudPct))
-      .median()
-      .normalizedDifference(['B8', 'B4'])
-      .rename('ndvi');
+      .map(img =>
+        img
+          .select(['B8', 'B4'])
+          .normalizedDifference(['B8', 'B4'])
+          .rename('ndvi')
+      );
 
-    const stats = ndviImage.reduceRegion({
-      reducer: ee.Reducer.minMax().combine({
-        reducer2: ee.Reducer.mean(),
-        sharedInputs: true
-      }),
-      geometry,
-      scale: 10,
-      maxPixels: 1e9
-    });
+    const count = await collection.size().getInfo();
+    if (count === 0) {
+      return res.json({
+        ndvi: null,
+        ndviMin: null,
+        ndviMax: null,
+        message: 'No NDVI images'
+      });
+    }
+
+    const ndviImage = collection.median();
+
+        const stats = ndviImage.reduceRegion({
+          reducer: ee.Reducer.minMax().combine({
+            reducer2: ee.Reducer.mean(),
+            sharedInputs: true
+          }),
+          geometry,
+          scale: 10,
+          maxPixels: 1e9
+        });
 
     const ndviStats = await stats.getInfo();
     console.log('Raw NDVI stats:', ndviStats);
@@ -250,7 +265,7 @@ app.post('/api/ndvi-daily', async (req, res) => {
     }
 
     // Уникальные даты с изображениями
-    const uniqueTimes = await collection.aggregate_array('system:time_start').getInfo(); // Получаем JS-массив
+    const uniqueTimes = await collection.aggregate_array('system:time_start').getInfo(); // JS-массив
     const filteredTimes = uniqueTimes.filter(t => t != null); // JS фильтр null
     const dateList = filteredTimes.map(time => new Date(time).toISOString().split('T')[0]); // YYYY-MM-DD
     console.log('Unique days with data:', dateList.length);
@@ -258,35 +273,42 @@ app.post('/api/ndvi-daily', async (req, res) => {
     const dailyStats = [];
 
     for (const day of dateList) {
-      console.log('Processing day:', day);
+    const dayCollection = collection
+      .filterDate(day, ee.Date(day).advance(1, 'day'));
 
-      const dayCollection = collection.filterDate(ee.Date(day), ee.Date(day).advance(1, 'day'));
-
-      const dayImage = dayCollection
-        .median()
-        .normalizedDifference(['B8', 'B4'])
-        .rename('ndvi')
-        .clip(geometry);
-
-      const dayStats = await dayImage.reduceRegion({
-        reducer: ee.Reducer.minMax().combine({
-          reducer2: ee.Reducer.mean(),
-          sharedInputs: true
-        }),
-        geometry,
-        scale: 10,
-        maxPixels: 1e9
-      }).getInfo();
-
-      if (dayStats.ndvi_mean !== undefined) {
-        dailyStats.push({
-          date: day,
-          ndvi_min: dayStats.ndvi_min,
-          ndvi_mean: dayStats.ndvi_mean,
-          ndvi_max: dayStats.ndvi_max
-        });
-      }
+    const dayCount = await dayCollection.size().getInfo();
+    if (dayCount === 0) {
+      console.log('Skip day (no images):', day);
+      continue;
     }
+
+    const dayImage = dayCollection
+      .select(['B8', 'B4'])
+      .median()
+      .normalizedDifference(['B8', 'B4'])
+      .rename('ndvi')
+      .clip(geometry);
+
+    const dayStats = await dayImage.reduceRegion({
+      reducer: ee.Reducer.minMax().combine({
+        reducer2: ee.Reducer.mean(),
+        sharedInputs: true
+      }),
+      geometry,
+      scale: 10,
+      maxPixels: 1e9
+    }).getInfo();
+
+    if (dayStats.ndvi_mean !== undefined && dayStats.ndvi_mean !== null) {
+      dailyStats.push({
+        date: day,
+        ndvi_min: dayStats.ndvi_min,
+        ndvi_mean: dayStats.ndvi_mean,
+        ndvi_max: dayStats.ndvi_max
+      });
+    }
+  }
+
 
     if (dailyStats.length === 0) {
       return res.json({ daily: [], message: 'No daily NDVI data for the period' });
